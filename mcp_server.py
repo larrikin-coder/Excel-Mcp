@@ -9,6 +9,9 @@ from openpyxl import Workbook, load_workbook
 
 import uvicorn
 
+
+from write_cell import *
+from create_sheet import *
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
@@ -91,35 +94,35 @@ class Middleware:
         return [tool.openai_tool() for tool in self.tool_functions]
 
 
-def create_sheet(filepath: str, sheet_name: str):
-    """Create a new sheet, create file if it doesn't exist."""
-    if not os.path.exists(filepath):
-        wb = Workbook()
-        wb.create_sheet(title=sheet_name)
-        default_sheet = wb["Sheet"]
-        wb.remove(default_sheet)
-    else:
-        wb = load_workbook(filepath)
-        wb.create_sheet(title=sheet_name)
+# def create_sheet(filepath: str, sheet_name: str):
+#     """Create a new sheet, create file if it doesn't exist."""
+#     if not os.path.exists(filepath):
+#         wb = Workbook()
+#         wb.create_sheet(title=sheet_name)
+#         default_sheet = wb["Sheet"]
+#         wb.remove(default_sheet)
+#     else:
+#         wb = load_workbook(filepath)
+#         wb.create_sheet(title=sheet_name)
 
-    wb.save(filepath)
-    return {"message": f"Sheet '{sheet_name}' created in '{filepath}'."}
+#     wb.save(filepath)
+#     return {"message": f"Sheet '{sheet_name}' created in '{filepath}'."}
 
-def write_cell(filepath: str, sheet_name: str, cell: str, value: str):
-    """Write a value to a specific cell. Create sheet if missing. Handle spaces, cases safely."""
-    wb = load_workbook(filepath)
+# def write_cell(filepath: str, sheet_name: str, cell: str, value: str):
+#     """Write a value to a specific cell. Create sheet if missing. Handle spaces, cases safely."""
+#     wb = load_workbook(filepath)
 
-    clean_sheet_names = {s.strip().lower(): s for s in wb.sheetnames}
-    requested_clean = sheet_name.strip().lower()
+#     clean_sheet_names = {s.strip().lower(): s for s in wb.sheetnames}
+#     requested_clean = sheet_name.strip().lower()
 
-    if requested_clean in clean_sheet_names:
-        ws = wb[clean_sheet_names[requested_clean]]
-    else:
-        ws = wb.create_sheet(title=sheet_name)
+#     if requested_clean in clean_sheet_names:
+#         ws = wb[clean_sheet_names[requested_clean]]
+#     else:
+#         ws = wb.create_sheet(title=sheet_name)
 
-    ws[cell] = value
-    wb.save(filepath)
-    return {"message": f"Value '{value}' written to {sheet_name}:{cell}"}
+#     ws[cell] = value
+#     wb.save(filepath)
+#     return {"message": f"Value '{value}' written to {sheet_name}:{cell}"}
 
 app = FastAPI()
 
