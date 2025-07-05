@@ -12,8 +12,11 @@ import uvicorn
 
 from write_cell import *
 from create_sheet import *
+
 load_dotenv()
+
 api_key = os.getenv("OPENAI_API_KEY")
+openai_client = AsyncOpenAI(api_key=api_key)
 
 
 class MCPServer:
@@ -66,7 +69,7 @@ class Middleware:
     def __init__(self, tool_functions):
         self.tool_functions = tool_functions
 
-    async def call(self, res):
+    async def call(self,client, res):
         try:
             tool_call = res['tool_calls'][0]
             tool_name = tool_call['function']['name']
@@ -133,14 +136,60 @@ mcp_handler = Middleware(
     ]
 )
 
+
+
 @app.post("/mcp")
 async def handle_mcp(request: Request):
     try:
         body = await request.json()
-        result = await mcp_handler.call(body)
+        result = await mcp_handler.call(openai_client,body)
         return JSONResponse(content=result)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+
+
+@app.post("/chat")
+async def chatgpt(request: Request):
+    data =  await request.json()
+    prompt = data.get('prompt')
+    
+    
+    default_filepath = "uploaded_file.xlsx"
+    
+    response = await openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{
+            "role":"system",
+            "content":(
+                "You are an Excel control agent."
+                "You have to use only MCP tools for the prompts give by users."
+                "Response should only be generated in structred MCPtool calls."
+                "You have full access of the MCP Tools and can plan accordingly how to call them for solving the user prompts"
+                f"If a tool requires a 'filepath' argument then use the {default_filepath} "
+                "Respond with short lines"
+                "Only tell whether the prompt instructions are successfully executed or not"
+                "If an error occurs explain the possible causes in a crisp and concise manner"
+                
+            )  
+        },{
+            "role":"user",
+            "content": prompt
+        }],
+        tools=mcp_handler.openai_tools(),
+        tool_choice = "auto"
+        )
+
+
+
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
