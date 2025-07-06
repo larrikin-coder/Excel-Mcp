@@ -9,8 +9,8 @@ load_dotenv()
 # MCP server URL
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL") 
 
-st.set_page_config(page_title="Excel Copilot 🚀", page_icon="📊")
-st.title("Excel Copilot 🚀")
+st.set_page_config(page_title="Exl LLM 🚀", page_icon="📊")
+st.title("Exl LLM 🚀")
 
 # Session state for history and file
 if 'history' not in st.session_state:
