@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+import google.generativeai as genai
 from openai import AsyncOpenAI
 from openpyxl import Workbook, load_workbook
 
@@ -18,6 +19,8 @@ load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 openai_client = AsyncOpenAI(api_key=api_key)
 
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 class MCPServer:
     def __init__(self, name, description, parameters, function):
@@ -150,39 +153,162 @@ async def handle_mcp(request: Request):
 
 
 
+# @app.post("/chat")
+# async def chatgpt(request: Request):
+#     data =  await request.json()
+#     prompt = data.get('prompt')
+    
+    
+#     default_filepath = "uploaded_file.xlsx"
+    
+#     response = await openai_client.chat.completions.create(
+#         model="gpt-4o",
+#         messages=[{
+#             "role":"system",
+#             "content":(
+#                 "You are an Excel control agent."
+#                 "You have to use only MCP tools for the prompts give by users."
+#                 "Response should only be generated in structred MCPtool calls."
+#                 "You have full access of the MCP Tools and can plan accordingly how to call them for solving the user prompts"
+#                 f"If a tool requires a 'filepath' argument then use the {default_filepath} "
+#                 "Respond with short lines"
+#                 "Only tell whether the prompt instructions are successfully executed or not"
+#                 "If an error occurs explain the possible causes in a crisp and concise manner"
+                
+#             )  
+#         },{
+#             "role":"user",
+#             "content": prompt
+#         }],
+#         tools=mcp_handler.openai_tools(),
+#         tool_choice = "auto"
+#         )     
+#     tool_calls = response.choices[0].message.tool_calls
+#     if not tool_calls:
+#         return{"error":"No MCP Tools Found in the model."}
+    
+#     all_responses = []
+#     for tool_call_obj in tool_calls:
+#         tool_call = tool_call_obj.to_dict()
+#         arguments = tool_call["function"]["arguments"]
+#         if isinstance(arguments, str):
+#             arguments = json.loads(arguments)
+
+#         if "filepath" not in arguments:
+#             arguments["filepath"] = default_filepath
+
+#         tool_call["function"]["arguments"] = arguments
+
+#         # Execute tool call
+#         mcp_response = await mcp_handler.call(openai_client, {"tool_calls": [tool_call]})
+#         all_responses.append(mcp_response)
+
+#     return {"results": all_responses}
+
+import traceback
+
+
+def extract_json_from_markdown(raw_text: str) -> str:
+    """
+    Extract JSON from a Markdown-style response like:
+    ```json
+    { "key": "value" }
+    ```
+    """
+    raw_text = raw_text.strip()
+    
+    # If the string starts with a markdown block (```json)
+    if raw_text.startswith("```"):
+        lines = raw_text.splitlines()
+        # Remove first and last line (```json and ```)
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1])
+    
+    return raw_text  # Assume it's clean JSON otherwise
+
+
+
+
 @app.post("/chat")
 async def chatgpt(request: Request):
-    data =  await request.json()
-    prompt = data.get('prompt')
-    
-    
-    default_filepath = "uploaded_file.xlsx"
-    
-    response = await openai_client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{
-            "role":"system",
-            "content":(
-                "You are an Excel control agent."
-                "You have to use only MCP tools for the prompts give by users."
-                "Response should only be generated in structred MCPtool calls."
-                "You have full access of the MCP Tools and can plan accordingly how to call them for solving the user prompts"
-                f"If a tool requires a 'filepath' argument then use the {default_filepath} "
-                "Respond with short lines"
-                "Only tell whether the prompt instructions are successfully executed or not"
-                "If an error occurs explain the possible causes in a crisp and concise manner"
-                
-            )  
-        },{
-            "role":"user",
-            "content": prompt
-        }],
-        tools=mcp_handler.openai_tools(),
-        tool_choice = "auto"
+    try:
+        data = await request.json()
+        prompt = data.get("prompt")
+        default_filepath = "uploaded_file.xlsx"
+
+        GEMINI_SYSTEM_PROMPT = """
+        You are an Excel control agent. You are only allowed to respond with a JSON structure that represents a tool/function call.
+
+        Format:
+        {
+        "function": {
+            "name": "tool_name",
+            "arguments": {
+            "param1": "value1",
+            "param2": "value2",
+            "filepath": "uploaded_file.xlsx"
+            }
+        }
+        }
+
+        Only use the available tools: `create_sheet`, `write_cell`.
+        You can use the functions concurrently if the prompt requires you to.
+        Details:
+        - `create_sheet`: needs `filepath` and `sheet_name`
+        - `write_cell`: needs `filepath`, `sheet_name`, `cell`, and `value`
+
+        ✅ Do not explain.
+        ✅ Do not add extra text.
+        ✅ Always return only the JSON structure.
+
+        If any argument is missing from user input, guess reasonable values.
+        """
+ 
+        # Format the prompt with system instruction
+        formatted_prompt = f"{GEMINI_SYSTEM_PROMPT.strip()}\n\nUser input: {prompt}"
+
+        # Call Gemini
+        response = model.generate_content(
+            contents=[
+                {
+                    "role": "user",
+                    "parts": [formatted_prompt]
+                }
+            ]
         )
 
+        reply = response.text.strip()
+        reply = extract_json_from_markdown(reply)
 
+        # Try to parse as JSON function call
+        try:
+            tool_data = json.loads(reply)
+            if not isinstance(tool_data, list):
+                tool_data = [tool_data]
+        except Exception as e:
+            return JSONResponse(status_code=500, content={
+                "error": f"Failed to parse Gemini response as JSON: {e}",
+                "raw_response": reply
+            })
 
+        tool_calls = []
+        for tool in tool_data:
+            if "function" in tool:
+                args = tool["function"]["arguments"]
+                if "filepath" not in args:
+                    args["filepath"] = default_filepath
+                tool_calls.append(tool)
+
+        all_responses = []
+        for tool_call in tool_calls:
+            mcp_response = await mcp_handler.call(None, {"tool_calls": [tool_call]})
+            all_responses.append(mcp_response)
+
+        return {"results": all_responses}
+
+    except Exception as e:
+        traceback.print_exc()  # <-- This will print the real error in the terminal
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 
@@ -192,4 +318,4 @@ async def chatgpt(request: Request):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)
