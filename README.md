@@ -80,7 +80,3 @@ Contributions are welcome! Please open issues or pull requests on [GitHub](https
 
 ## License
 MIT License
-
----
-
-> GitHub Repository: [https://github.com/larrikin-coder/Excel-Mcp](https://github.com/larrikin-coder/Excel-Mcp) 
