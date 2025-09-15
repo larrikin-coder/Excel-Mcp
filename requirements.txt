@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+openpyxl
+requests
+streamlit
+google-generativeai
+openai
