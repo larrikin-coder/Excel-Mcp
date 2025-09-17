@@ -10,8 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 from openai import AsyncOpenAI
 
-from write_cell import *
-from create_sheet import *
+from create_sheet import create_sheet
+from write_cell import write_cell
 
 import uvicorn
 
@@ -29,7 +29,7 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict later to Streamlit domain
+    allow_origins=["*"],  # restrict later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -150,6 +150,10 @@ async def chatgpt(request: Request):
         GEMINI_SYSTEM_PROMPT = """
         You are an Excel control agent. You are only allowed to respond with a JSON structure that represents a tool/function call.
 
+        ❗ IMPORTANT: Always include all required arguments.
+        - For create_sheet: filepath, sheet_name
+        - For write_cell: filepath, sheet_name, cell, value
+
         Format:
         {
         "function": {
@@ -161,8 +165,6 @@ async def chatgpt(request: Request):
             }
         }
         }
-
-        Only use the available tools: `create_sheet`, `write_cell`.
         """
 
         formatted_prompt = f"{GEMINI_SYSTEM_PROMPT.strip()}\n\nUser input: {prompt}"
@@ -187,8 +189,18 @@ async def chatgpt(request: Request):
         for tool in tool_data:
             if "function" in tool:
                 args = tool["function"]["arguments"]
-                if "filepath" not in args:
-                    args["filepath"] = default_filepath
+
+                # Always ensure filepath
+                args.setdefault("filepath", default_filepath)
+
+                # Add safe defaults
+                if tool["function"]["name"] == "write_cell":
+                    args.setdefault("sheet_name", "Sheet1")
+                    args.setdefault("cell", "A1")
+                    args.setdefault("value", "")
+                elif tool["function"]["name"] == "create_sheet":
+                    args.setdefault("sheet_name", "Sheet1")
+
                 mcp_response = await mcp_handler.call(None, {"tool_calls": [tool]})
                 all_responses.append(mcp_response)
 

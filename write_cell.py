@@ -1,12 +1,17 @@
-from modules import *
-
-def file_to_base64(filepath):
-    with open(filepath, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+from modules import load_workbook, file_to_base64
 
 def write_cell(filepath: str, sheet_name: str, cell: str, value: str):
     """Write a value to a specific cell. Create sheet if missing. Return updated file in base64."""
-    wb = load_workbook(filepath)
+
+    try:
+        wb = load_workbook(filepath)
+    except FileNotFoundError:
+        # If file doesn’t exist, create a new one
+        from openpyxl import Workbook
+        wb = Workbook()
+        default_sheet = wb["Sheet"]
+        wb.remove(default_sheet)
+        wb.create_sheet(title=sheet_name)
 
     clean_sheet_names = {s.strip().lower(): s for s in wb.sheetnames}
     requested_clean = sheet_name.strip().lower()

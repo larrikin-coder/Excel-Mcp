@@ -1,8 +1,4 @@
-from modules import *
-
-def file_to_base64(filepath):
-    with open(filepath, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+from modules import Workbook, load_workbook, os, file_to_base64
 
 def create_sheet(filepath: str, sheet_name: str):
     """Create a new sheet, create file if it doesn't exist, return updated file in base64."""

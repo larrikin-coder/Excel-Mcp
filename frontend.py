@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL") 
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL")
 
 st.set_page_config(page_title="Exl LLM 🚀", page_icon="📊")
 st.title("Exl LLM 🚀")
@@ -40,8 +40,9 @@ if os.path.exists(st.session_state.uploaded_filename):
 
                 # ✅ Decode and save file locally
                 if "results" in result and len(result["results"]) > 0:
-                    if "file" in result["results"][-1]:
-                        file_data = base64.b64decode(result["results"][-1]["file"])
+                    last = result["results"][-1]
+                    if "file" in last:
+                        file_data = base64.b64decode(last["file"])
                         with open(st.session_state.uploaded_filename, "wb") as f:
                             f.write(file_data)
 
