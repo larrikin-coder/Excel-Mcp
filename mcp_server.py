@@ -148,24 +148,53 @@ async def chatgpt(request: Request):
         default_filepath = "uploaded_file.xlsx"
 
         GEMINI_SYSTEM_PROMPT = """
-        You are an Excel control agent. You are only allowed to respond with a JSON structure that represents a tool/function call.
+        You are an Excel control agent. You are only allowed to respond with a JSON structure that represents tool/function calls.
 
         ❗ IMPORTANT: Always include all required arguments.
         - For create_sheet: filepath, sheet_name
         - For write_cell: filepath, sheet_name, cell, value
 
-        Format:
+        Format for a single call:
         {
         "function": {
             "name": "tool_name",
             "arguments": {
             "param1": "value1",
-            "param2": "value2",
             "filepath": "uploaded_file.xlsx"
             }
         }
         }
+
+        Format for multiple calls:
+        [
+        {
+            "function": {
+            "name": "write_cell",
+            "arguments": {
+                "filepath": "uploaded_file.xlsx",
+                "sheet_name": "Students",
+                "cell": "A1",
+                "value": "Alice"
+            }
+            }
+        },
+        {
+            "function": {
+            "name": "write_cell",
+            "arguments": {
+                "filepath": "uploaded_file.xlsx",
+                "sheet_name": "Students",
+                "cell": "A2",
+                "value": "Bob"
+            }
+            }
+        }
+        ]
+
+        ✅ If user requests multiple actions (like writing 5 names), always return an array with multiple function calls.
+        ✅ Do not explain, only return JSON.
         """
+
 
         formatted_prompt = f"{GEMINI_SYSTEM_PROMPT.strip()}\n\nUser input: {prompt}"
 
