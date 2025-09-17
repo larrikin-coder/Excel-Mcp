@@ -1,36 +1,31 @@
 import streamlit as st
 import requests
 import os
+import base64
 from openpyxl import Workbook
 from dotenv import load_dotenv
 
-
 load_dotenv()
-# MCP server URL
+
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL") 
 
 st.set_page_config(page_title="Exl LLM 🚀", page_icon="📊")
 st.title("Exl LLM 🚀")
 
-# Session state for history and file
 if 'history' not in st.session_state:
     st.session_state.history = []
 
 if 'uploaded_filename' not in st.session_state:
-    st.session_state.uploaded_filename = None
+    st.session_state.uploaded_filename = "uploaded_file.xlsx"
 
 st.subheader("✨ Create New Excel File")
 
 if st.button("📄 Create New Blank Excel"):
-    temp_filename = "uploaded_file.xlsx"
     wb = Workbook()
-    wb.save(temp_filename)
-    st.session_state.uploaded_filename = temp_filename
+    wb.save(st.session_state.uploaded_filename)
     st.success("New blank Excel created!")
 
-# Show prompt section if file is ready
-if st.session_state.uploaded_filename:
-
+if os.path.exists(st.session_state.uploaded_filename):
     st.subheader("Ask something about Excel ✍️")
     user_prompt = st.text_input("Enter your prompt (e.g., Create a sheet called Finance)")
 
@@ -42,17 +37,25 @@ if st.session_state.uploaded_filename:
             if response.status_code == 200:
                 result = response.json()
                 st.session_state.history.append((user_prompt, result))
+
+                # ✅ Decode and save file locally
+                if "results" in result and len(result["results"]) > 0:
+                    if "file" in result["results"][-1]:
+                        file_data = base64.b64decode(result["results"][-1]["file"])
+                        with open(st.session_state.uploaded_filename, "wb") as f:
+                            f.write(file_data)
+
                 st.success("✅ Prompt processed!")
             else:
-                st.error(f"❌ Error: {response.status_code}")
+                st.error(f"❌ Error: {response.status_code} {response.text}")
 
-    # Chat history display
+    # Chat history
     st.subheader("Chat History 💬")
     for prompt, result in st.session_state.history[::-1]:
         st.markdown(f"**You:** {prompt}")
         st.json(result)
 
-    # Download updated file
+    # Download button
     if os.path.exists(st.session_state.uploaded_filename):
         with open(st.session_state.uploaded_filename, "rb") as f:
             st.download_button(

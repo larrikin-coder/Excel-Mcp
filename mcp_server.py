@@ -1,18 +1,19 @@
 import os
 import json
+import traceback
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
 import google.generativeai as genai
 from openai import AsyncOpenAI
-from openpyxl import Workbook, load_workbook
-
-import uvicorn
-import traceback
 
 from write_cell import *
 from create_sheet import *
+
+import uvicorn
 
 load_dotenv()
 
@@ -23,22 +24,19 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # -------------------------------
-# ✅ Create FastAPI app with CORS
+# FastAPI App + CORS
 # -------------------------------
-from fastapi.middleware.cors import CORSMiddleware
-
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # you can restrict to your Streamlit domain later
+    allow_origins=["*"],  # restrict later to Streamlit domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -------------------------------
-# MCP Classes (unchanged)
+# MCP Infrastructure
 # -------------------------------
 class MCPServer:
     def __init__(self, name, description, parameters, function):
@@ -79,12 +77,10 @@ class MCPServer:
             }
         }
 
-
 class ToolFunction:
     @staticmethod
     def from_function(fn):
         return MCPServer.from_function(fn)
-
 
 class Middleware:
     def __init__(self, tool_functions):
@@ -117,9 +113,6 @@ class Middleware:
         return [tool.openai_tool() for tool in self.tool_functions]
 
 
-# -------------------------------
-# MCP handler setup
-# -------------------------------
 mcp_handler = Middleware(
     tool_functions=[
         ToolFunction.from_function(write_cell),
@@ -127,7 +120,9 @@ mcp_handler = Middleware(
     ]
 )
 
-
+# -------------------------------
+# Endpoints
+# -------------------------------
 @app.post("/mcp")
 async def handle_mcp(request: Request):
     try:
@@ -137,10 +132,6 @@ async def handle_mcp(request: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-
-# -------------------------------
-# Chat Endpoint (unchanged)
-# -------------------------------
 def extract_json_from_markdown(raw_text: str) -> str:
     raw_text = raw_text.strip()
     if raw_text.startswith("```"):
@@ -148,7 +139,6 @@ def extract_json_from_markdown(raw_text: str) -> str:
         if len(lines) >= 3:
             return "\n".join(lines[1:-1])
     return raw_text
-
 
 @app.post("/chat")
 async def chatgpt(request: Request):
@@ -173,16 +163,6 @@ async def chatgpt(request: Request):
         }
 
         Only use the available tools: `create_sheet`, `write_cell`.
-        You can use the functions concurrently if the prompt requires you to.
-        Details:
-        - `create_sheet`: needs `filepath` and `sheet_name`
-        - `write_cell`: needs `filepath`, `sheet_name`, `cell`, and `value`
-
-        ✅ Do not explain.
-        ✅ Do not add extra text.
-        ✅ Always return only the JSON structure.
-
-        If any argument is missing from user input, guess reasonable values.
         """
 
         formatted_prompt = f"{GEMINI_SYSTEM_PROMPT.strip()}\n\nUser input: {prompt}"
@@ -191,8 +171,7 @@ async def chatgpt(request: Request):
             contents=[{"role": "user", "parts": [formatted_prompt]}]
         )
 
-        reply = response.text.strip()
-        reply = extract_json_from_markdown(reply)
+        reply = extract_json_from_markdown(response.text.strip())
 
         try:
             tool_data = json.loads(reply)
@@ -201,24 +180,17 @@ async def chatgpt(request: Request):
         except Exception as e:
             return JSONResponse(
                 status_code=500,
-                content={
-                    "error": f"Failed to parse Gemini response as JSON: {e}",
-                    "raw_response": reply,
-                },
+                content={"error": f"Failed to parse Gemini response as JSON: {e}", "raw_response": reply}
             )
 
-        tool_calls = []
+        all_responses = []
         for tool in tool_data:
             if "function" in tool:
                 args = tool["function"]["arguments"]
                 if "filepath" not in args:
                     args["filepath"] = default_filepath
-                tool_calls.append(tool)
-
-        all_responses = []
-        for tool_call in tool_calls:
-            mcp_response = await mcp_handler.call(None, {"tool_calls": [tool_call]})
-            all_responses.append(mcp_response)
+                mcp_response = await mcp_handler.call(None, {"tool_calls": [tool]})
+                all_responses.append(mcp_response)
 
         return {"results": all_responses}
 
@@ -226,10 +198,9 @@ async def chatgpt(request: Request):
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-
 # -------------------------------
-# ✅ Dynamic port binding for Render
+# Run (Render dynamic port)
 # -------------------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))  # Render sets PORT automatically
+    port = int(os.getenv("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
