@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 from openpyxl import Workbook, load_workbook
 
 import uvicorn
-
+import traceback
 
 from write_cell import *
 from create_sheet import *
@@ -22,6 +22,24 @@ openai_client = AsyncOpenAI(api_key=api_key)
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel('gemini-2.5-flash')
 
+# -------------------------------
+# ✅ Create FastAPI app with CORS
+# -------------------------------
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # you can restrict to your Streamlit domain later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -------------------------------
+# MCP Classes (unchanged)
+# -------------------------------
 class MCPServer:
     def __init__(self, name, description, parameters, function):
         self.name = name
@@ -72,13 +90,12 @@ class Middleware:
     def __init__(self, tool_functions):
         self.tool_functions = tool_functions
 
-    async def call(self,client, res):
+    async def call(self, client, res):
         try:
             tool_call = res['tool_calls'][0]
             tool_name = tool_call['function']['name']
             tool_args_raw = tool_call['function']['arguments']
 
-            # Handle both string or dict input
             if isinstance(tool_args_raw, str):
                 tool_args = json.loads(tool_args_raw)
             elif isinstance(tool_args_raw, dict):
@@ -100,38 +117,9 @@ class Middleware:
         return [tool.openai_tool() for tool in self.tool_functions]
 
 
-# def create_sheet(filepath: str, sheet_name: str):
-#     """Create a new sheet, create file if it doesn't exist."""
-#     if not os.path.exists(filepath):
-#         wb = Workbook()
-#         wb.create_sheet(title=sheet_name)
-#         default_sheet = wb["Sheet"]
-#         wb.remove(default_sheet)
-#     else:
-#         wb = load_workbook(filepath)
-#         wb.create_sheet(title=sheet_name)
-
-#     wb.save(filepath)
-#     return {"message": f"Sheet '{sheet_name}' created in '{filepath}'."}
-
-# def write_cell(filepath: str, sheet_name: str, cell: str, value: str):
-#     """Write a value to a specific cell. Create sheet if missing. Handle spaces, cases safely."""
-#     wb = load_workbook(filepath)
-
-#     clean_sheet_names = {s.strip().lower(): s for s in wb.sheetnames}
-#     requested_clean = sheet_name.strip().lower()
-
-#     if requested_clean in clean_sheet_names:
-#         ws = wb[clean_sheet_names[requested_clean]]
-#     else:
-#         ws = wb.create_sheet(title=sheet_name)
-
-#     ws[cell] = value
-#     wb.save(filepath)
-#     return {"message": f"Value '{value}' written to {sheet_name}:{cell}"}
-
-app = FastAPI()
-
+# -------------------------------
+# MCP handler setup
+# -------------------------------
 mcp_handler = Middleware(
     tool_functions=[
         ToolFunction.from_function(write_cell),
@@ -140,93 +128,26 @@ mcp_handler = Middleware(
 )
 
 
-
 @app.post("/mcp")
 async def handle_mcp(request: Request):
     try:
         body = await request.json()
-        result = await mcp_handler.call(openai_client,body)
+        result = await mcp_handler.call(openai_client, body)
         return JSONResponse(content=result)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-
-
-# @app.post("/chat")
-# async def chatgpt(request: Request):
-#     data =  await request.json()
-#     prompt = data.get('prompt')
-    
-    
-#     default_filepath = "uploaded_file.xlsx"
-    
-#     response = await openai_client.chat.completions.create(
-#         model="gpt-4o",
-#         messages=[{
-#             "role":"system",
-#             "content":(
-#                 "You are an Excel control agent."
-#                 "You have to use only MCP tools for the prompts give by users."
-#                 "Response should only be generated in structred MCPtool calls."
-#                 "You have full access of the MCP Tools and can plan accordingly how to call them for solving the user prompts"
-#                 f"If a tool requires a 'filepath' argument then use the {default_filepath} "
-#                 "Respond with short lines"
-#                 "Only tell whether the prompt instructions are successfully executed or not"
-#                 "If an error occurs explain the possible causes in a crisp and concise manner"
-                
-#             )  
-#         },{
-#             "role":"user",
-#             "content": prompt
-#         }],
-#         tools=mcp_handler.openai_tools(),
-#         tool_choice = "auto"
-#         )     
-#     tool_calls = response.choices[0].message.tool_calls
-#     if not tool_calls:
-#         return{"error":"No MCP Tools Found in the model."}
-    
-#     all_responses = []
-#     for tool_call_obj in tool_calls:
-#         tool_call = tool_call_obj.to_dict()
-#         arguments = tool_call["function"]["arguments"]
-#         if isinstance(arguments, str):
-#             arguments = json.loads(arguments)
-
-#         if "filepath" not in arguments:
-#             arguments["filepath"] = default_filepath
-
-#         tool_call["function"]["arguments"] = arguments
-
-#         # Execute tool call
-#         mcp_response = await mcp_handler.call(openai_client, {"tool_calls": [tool_call]})
-#         all_responses.append(mcp_response)
-
-#     return {"results": all_responses}
-
-import traceback
-
-
+# -------------------------------
+# Chat Endpoint (unchanged)
+# -------------------------------
 def extract_json_from_markdown(raw_text: str) -> str:
-    """
-    Extract JSON from a Markdown-style response like:
-    ```json
-    { "key": "value" }
-    ```
-    """
     raw_text = raw_text.strip()
-    
-    # If the string starts with a markdown block (```json)
     if raw_text.startswith("```"):
         lines = raw_text.splitlines()
-        # Remove first and last line (```json and ```)
         if len(lines) >= 3:
             return "\n".join(lines[1:-1])
-    
-    return raw_text  # Assume it's clean JSON otherwise
-
-
+    return raw_text
 
 
 @app.post("/chat")
@@ -263,33 +184,28 @@ async def chatgpt(request: Request):
 
         If any argument is missing from user input, guess reasonable values.
         """
- 
-        # Format the prompt with system instruction
+
         formatted_prompt = f"{GEMINI_SYSTEM_PROMPT.strip()}\n\nUser input: {prompt}"
 
-        # Call Gemini
         response = model.generate_content(
-            contents=[
-                {
-                    "role": "user",
-                    "parts": [formatted_prompt]
-                }
-            ]
+            contents=[{"role": "user", "parts": [formatted_prompt]}]
         )
 
         reply = response.text.strip()
         reply = extract_json_from_markdown(reply)
 
-        # Try to parse as JSON function call
         try:
             tool_data = json.loads(reply)
             if not isinstance(tool_data, list):
                 tool_data = [tool_data]
         except Exception as e:
-            return JSONResponse(status_code=500, content={
-                "error": f"Failed to parse Gemini response as JSON: {e}",
-                "raw_response": reply
-            })
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": f"Failed to parse Gemini response as JSON: {e}",
+                    "raw_response": reply,
+                },
+            )
 
         tool_calls = []
         for tool in tool_data:
@@ -307,15 +223,13 @@ async def chatgpt(request: Request):
         return {"results": all_responses}
 
     except Exception as e:
-        traceback.print_exc()  # <-- This will print the real error in the terminal
+        traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
-
-
-
-
-
-
+# -------------------------------
+# ✅ Dynamic port binding for Render
+# -------------------------------
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    port = int(os.getenv("PORT", 10000))  # Render sets PORT automatically
+    uvicorn.run(app, host="0.0.0.0", port=port)
